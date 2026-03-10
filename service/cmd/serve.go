@@ -34,6 +34,30 @@ func authMiddleware(key string) func(http.Handler) http.Handler {
 	}
 }
 
+func copyHeaders(w http.ResponseWriter, headers http.Header) {
+	for k, vals := range headers {
+		for _, v := range vals {
+			w.Header().Add(k, v)
+		}
+	}
+}
+
+func fetchOrigin(targetURL string) ([]byte, http.Header, string, error) {
+	resp, err := http.Get(targetURL)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("Failed to fetch origin: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("Failed to read origin response")
+	}
+
+	cc := resp.Header.Get("Cache-Control")
+	return body, resp.Header, cc, nil
+}
+
 func newServer(c *cache.Cache, key string, opts ...func(*fuego.Server)) *fuego.Server {
 	s := fuego.NewServer(opts...)
 	fuego.Use(s, authMiddleware(key))
@@ -49,11 +73,7 @@ func newServer(c *cache.Cache, key string, opts ...func(*fuego.Server)) *fuego.S
 		}
 
 		if entry, ok := c.Get(targetURL); ok {
-			for k, vals := range entry.Headers {
-				for _, v := range vals {
-					w.Header().Add(k, v)
-				}
-			}
+			copyHeaders(w, entry.Headers)
 			remaining := time.Until(entry.Expiry).Seconds()
 			w.Header().Set("X-Proxy-Cache", "HIT")
 			w.Header().Set("X-Cache-TTL-Remaining", strconv.Itoa(int(remaining)))
@@ -62,34 +82,22 @@ func newServer(c *cache.Cache, key string, opts ...func(*fuego.Server)) *fuego.S
 			return nil, nil
 		}
 
-		resp, err := http.Get(targetURL)
+		body, headers, cc, err := fetchOrigin(targetURL)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to fetch origin: %v", err), http.StatusBadGateway)
-			return nil, nil
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			http.Error(w, "Failed to read origin response", http.StatusBadGateway)
+			http.Error(w, err.Error(), http.StatusBadGateway)
 			return nil, nil
 		}
 
-		cc := resp.Header.Get("Cache-Control")
 		maxAge, shouldStore := cache.ParseCacheControl(cc)
 		if shouldStore {
 			c.Set(targetURL, &cache.Entry{
 				Body:    body,
-				Headers: resp.Header.Clone(),
+				Headers: headers.Clone(),
 				Expiry:  time.Now().Add(time.Duration(maxAge) * time.Second),
 			})
 		}
 
-		for k, vals := range resp.Header {
-			for _, v := range vals {
-				w.Header().Add(k, v)
-			}
-		}
+		copyHeaders(w, headers)
 		w.Header().Set("X-Proxy-Cache", "MISS")
 		w.WriteHeader(http.StatusOK)
 		w.Write(body)
