@@ -75,8 +75,8 @@ func newServer(c *cache.Cache, key string, opts ...func(*fuego.Server)) *fuego.S
 			return nil, nil
 		}
 
-		cc := resp.Header.Get("Cache-Control")
-		maxAge, shouldStore := cache.ParseCacheControl(cc)
+		cacheControl := resp.Header.Get("Cache-Control")
+		maxAge, shouldStore := cache.ParseCacheControl(cacheControl)
 		if shouldStore {
 			c.Set(targetURL, &cache.Entry{
 				Body:    body,
