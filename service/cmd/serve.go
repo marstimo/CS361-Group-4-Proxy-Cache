@@ -54,8 +54,8 @@ func fetchOrigin(targetURL string) ([]byte, http.Header, string, error) {
 		return nil, nil, "", fmt.Errorf("Failed to read origin response")
 	}
 
-	cc := resp.Header.Get("Cache-Control")
-	return body, resp.Header, cc, nil
+	cacheControl := resp.Header.Get("Cache-Control")
+	return body, resp.Header, cacheControl, nil
 }
 
 func newServer(c *cache.Cache, key string, opts ...func(*fuego.Server)) *fuego.Server {
@@ -82,13 +82,13 @@ func newServer(c *cache.Cache, key string, opts ...func(*fuego.Server)) *fuego.S
 			return nil, nil
 		}
 
-		body, headers, cc, err := fetchOrigin(targetURL)
+		body, headers, cacheControl, err := fetchOrigin(targetURL)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return nil, nil
 		}
 
-		maxAge, shouldStore := cache.ParseCacheControl(cc)
+		maxAge, shouldStore := cache.ParseCacheControl(cacheControl)
 		if shouldStore {
 			c.Set(targetURL, &cache.Entry{
 				Body:    body,
